@@ -62,7 +62,7 @@ class EmbeddedFigure(tk.Frame):
         super().__init__(master, *args, **kwargs)
         self.master = master
 
-        self.options_dict = {'logarithmic': [False, False],'xlim': None}
+        self.options_dict = {'logarithmic': [False, False],'xlim': None,'ylim': None}
 
         self.f = plt.Figure(figsize=(10, 6))
         gs = gridspec.GridSpec(1, 1, height_ratios=[1])
@@ -112,9 +112,27 @@ class EmbeddedFigure(tk.Frame):
         if k is not None:
             self.subplot1.plot(k[:,0],k[:,1])
 
-        self.subplot1.set_xlim(wav.min(),wav.max())
+        if self.options_dict['xlim'] is None:
+            self.subplot1.set_xlim(wav.min(), wav.max())
+        else:
+            self.subplot1.set_xlim(self.options_dict['xlim'][0], self.options_dict['xlim'][1])
+
+        if self.options_dict['ylim'] is not None:
+            self.subplot1.set_ylim(self.options_dict['ylim'][0], self.options_dict['ylim'][1])
+
+
         self.subplot1.set_xlabel(r'Wavelength [$\mu$m]')
         self.subplot1.set_ylabel(r'Refractive Index')
+
+        if self.options_dict['logarithmic'][0]:
+            self.subplot1.set_xscale('log')
+        else:
+            self.subplot1.set_xscale('linear')
+
+        if self.options_dict['logarithmic'][1]:
+            self.subplot1.set_yscale('log')
+        else:
+            self.subplot1.set_yscale('linear')
 
         plt.pause(0.001)
         self.canvas.draw()
@@ -179,7 +197,7 @@ class SearchFrame(tk.Frame):
     def update_tree(self):
         self.result_tree.delete(*self.result_tree.get_children())
         for i,res in enumerate(self.search_res):
-            self.result_tree.insert('', 'end', text=str(i),values=(res[2],res[3],res[7],res[8],res[6],res[9]))
+            self.result_tree.insert('', 'end', text=str(i),values=(res[2],res[3],res[7],res[8],('No','Yes')[res[6]],res[9]))
 
     def OnDoubleClick(self, event):
         item_1 = self.result_tree.selection()[0]
@@ -231,19 +249,32 @@ class FigureOptionFrame(tk.Frame):
                                                  command=self.set_values_for_figure)
         self.log_checkbutton_y.pack(side=tk.LEFT, padx=self.padx)
 
-        self.xmin_entry = LabelWithEntry(self,'fmin=', width_entry=5,width_label=5)
+        self.xmin_entry = LabelWithEntry(self,'xmin=', width_entry=5,width_label=5)
         self.xmin_entry.bind("<Return>",lambda event: self.set_values_for_figure())
         self.xmin_entry.pack(side=tk.LEFT, padx=self.padx)
 
-        self.xmax_entry = LabelWithEntry(self,'fmax=', width_entry=5,width_label=5)
+        self.xmax_entry = LabelWithEntry(self,'xmax=', width_entry=5,width_label=5)
         self.xmax_entry.bind("<Return>",lambda event: self.set_values_for_figure())
         self.xmax_entry.pack(side=tk.LEFT, padx=self.padx)
+
+        self.ymin_entry = LabelWithEntry(self,'ymin=', width_entry=5,width_label=5)
+        self.ymin_entry.bind("<Return>",lambda event: self.set_values_for_figure())
+        self.ymin_entry.pack(side=tk.LEFT, padx=self.padx)
+
+        self.ymax_entry = LabelWithEntry(self,'ymax=', width_entry=5,width_label=5)
+        self.ymax_entry.bind("<Return>",lambda event: self.set_values_for_figure())
+        self.ymax_entry.pack(side=tk.LEFT, padx=self.padx)
 
     def set_values_for_figure(self):
         try:
             self.option_dict['xlim'] = [float(self.xmin_entry.get()), float(self.xmax_entry.get())]
         except ValueError:
             self.option_dict['xlim'] = None
+
+        try:
+            self.option_dict['ylim'] = [float(self.ymin_entry.get()), float(self.ymax_entry.get())]
+        except ValueError:
+            self.option_dict['ylim'] = None
 
         if self.log_var_x.get():
             self.option_dict['logarithmic'][0] = True
@@ -255,7 +286,7 @@ class FigureOptionFrame(tk.Frame):
         else:
             self.option_dict['logarithmic'][1] = False
 
-        q1.put('update figure')
+        q1.put(('update figure',None))
 
 
 class Application(tk.Frame):
