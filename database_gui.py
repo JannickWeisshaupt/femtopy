@@ -35,9 +35,18 @@ def derivative(n,order):
         ref = (ref-np.roll(ref,1))/(l-np.roll(l,1))
     return np.array([l[order:],ref[order:]]).T
 
+def second_der(n):
+    l = n[:,0]
+    ref = n[:,1]
+
+    var1 = np.roll(ref,-1) - 2*ref+np.roll(ref,1)
+    var2 = l-np.roll(l,1)
+    res = var1/var2**2
+    return np.array([l[1:-1],res[1:-1]]).T
+
 
 def gvd(data):
-    der_sol = derivative(data,2)
+    der_sol = second_der(data)
     lambda0 = der_sol[:,0]
     der_1 = der_sol[:,1]
     res = lambda0**3/(2*np.pi*c0**2)*der_1
@@ -85,8 +94,10 @@ class EmbeddedFigure(tk.Frame):
         self.f = plt.Figure(figsize=(10, 6))
         gs = gridspec.GridSpec(2, 1, height_ratios=[2,1])
         self.subplot1 = self.f.add_subplot(gs[0])
-        self.subplot1.format_coord = lambda x, y: "lambda={0:1.2f}, n/k={1:1.1f}".format(x, y)
         self.subplot2 = self.f.add_subplot(gs[1],sharex=self.subplot1)
+        self.subplot1.format_coord = self.formatter1
+        self.subplot2.format_coord = lambda x, y: "lambda={0:1.2f}, GVD={1:1.0f}".format(x, y)
+
 
         colortuple = master.winfo_rgb(self.master.cget('bg'))
         color_rgb = [x / 16 ** 4 for x in colortuple]
@@ -99,7 +110,6 @@ class EmbeddedFigure(tk.Frame):
         self.subplot2.set_ylim(0,1000)
         self.subplot2.set_ylabel(r'GVD [fs$^2$/mm]')
 
-
         self.f.tight_layout()
 
         self.canvas = FigureCanvasTkAgg(self.f, self)
@@ -110,6 +120,9 @@ class EmbeddedFigure(tk.Frame):
         self.canvas._tkcanvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         self.last_data = None
+
+    def formatter1(self,x,y):
+        return "lambda={0:1.2f}, n/k={1:1.3f}".format(x, y)
 
     def update_figure(self, data=None):
 
@@ -129,11 +142,17 @@ class EmbeddedFigure(tk.Frame):
         self.subplot2.cla()
 
         wav=n[:,0]
-        wav2 = wav[2:]
+        wav2,gvd_res = gvd(n)
+
         if self.options_dict['eV']:
             x_plot = 1.240/wav
+            x_plot2 = 1.240/wav2
+            self.subplot2.set_xlabel(r'Photon Energy [eV]')
         else:
             x_plot = wav
+            x_plot2 = wav2
+            self.subplot2.set_xlabel(r'Wavelength [$\mu$m]')
+
 
 
         if self.options_dict['xlim'] is None:
@@ -142,20 +161,18 @@ class EmbeddedFigure(tk.Frame):
             self.subplot1.set_xlim(self.options_dict['xlim'][0], self.options_dict['xlim'][1])
             xmin = self.options_dict['xlim'][0]
             xmax = self.options_dict['xlim'][1]
-            mask = (x_plot>xmin) & (x_plot<xmax)
+            mask = (x_plot>=xmin) & (x_plot<=xmax)
+            mask2 = (x_plot2>=xmin) & (x_plot2<=xmax)
+
             n = n[mask,:]
+            gvd_res = gvd_res[mask2]
             if k is not None:
                 k = k[mask,:]
             wav = wav[mask]
             x_plot = x_plot[mask]
+            x_plot2 = x_plot2[mask2]
 
-        wav2,gvd_res = gvd(n)
-        if self.options_dict['eV']:
-            x_plot2 = 1.240/wav2
-            self.subplot2.set_xlabel(r'Photon Energy [eV]')
-        else:
-            x_plot2 = wav2
-            self.subplot2.set_xlabel(r'Wavelength [$\mu$m]')
+
 
         if self.options_dict['ylim'] is not None:
             self.subplot1.set_ylim(self.options_dict['ylim'][0], self.options_dict['ylim'][1])
