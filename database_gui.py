@@ -182,7 +182,7 @@ class SearchFrame(tk.Frame):
             if self._after_id is not None:
                 master.after_cancel(self._after_id)
             # create a new job
-            self._after_id = master.after(100, self.search)
+            self._after_id = master.after(20, self.search)
 
         self.search_field = LabelWithEntry(self,'Search')
         self.search_field.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
