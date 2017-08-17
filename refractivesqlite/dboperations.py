@@ -39,10 +39,10 @@ class Database:
         c = conn.cursor()
         c.execute(sqlquery)
         results = c.fetchall()
-        if len(results)==0:
-            print("No results found.")
-        else:
-            print(len(results),"results found.")
+        # if len(results)==0:
+        #     print("No results found.")
+        # else:
+        #     print(len(results),"results found.")
         conn.close()
         return results
 
@@ -54,14 +54,14 @@ class Database:
         else:
             c.execute('SELECT * FROM pages WHERE shelf like ? or book like ? or page like ? or filepath like ?', [term for i in range(4)])
         results = c.fetchall()
-        if len(results)==0:
-            print("No results found.")
-        else:
-            print(len(results),"results found.")
-            columns = self._get_pages_columns()
-            print("\t".join(columns))
-            for r in results:
-                print("\t".join(map(str,r[:])))
+        # if len(results)==0:
+        #     print("No results found.")
+        # else:
+        #     print(len(results),"results found.")
+        #     columns = self._get_pages_columns()
+        #     print("\t".join(columns))
+        #     for r in results:
+        #         print("\t".join(map(str,r[:])))
         conn.close()
         return results
 
@@ -157,7 +157,7 @@ class Database:
                 wavelengths_e = [r[0] for r in results]
                 extinction = [r[1] for r in results]
             conn.close()
-            print("Material",pagedata['filepath'],"loaded.")
+            # print("Material",pagedata['filepath'],"loaded.")
             return Material.FromLists(pagedata,wavelengths_r=wavelengths_r,refractive=refractive,
                                       wavelengths_e=wavelengths_e,extinction=extinction)
 
@@ -177,7 +177,7 @@ class Database:
             return None
         k = mat.get_complete_extinction()
         if k is None:
-            print("Material has no extinction data.")
+            # print("Material has no extinction data.")
             return None
         return np.array(k)
 

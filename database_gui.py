@@ -25,6 +25,25 @@ dbpath = r"RefractiveIndex.db"
 
 db = DB.Database(dbpath)
 
+c0 = 3e8
+
+
+def derivative(n,order):
+    l = n[:,0]
+    ref = n[:,1]
+
+    for i in range(order):
+        ref = (ref-np.roll(ref,1))/(l-np.roll(l,1))
+    return np.array([l[order:],ref[order:]]).T
+
+
+def gvd(data):
+    der_sol = derivative(data,2)
+    lambda0 = der_sol[:,0]
+    der_1 = der_sol[:,1]
+    res = lambda0**3/(2*np.pi*c0**2)*der_1
+    res = res * 1e21
+    return lambda0,res
 
 
 class NewCBox(ttk.Combobox):
@@ -65,19 +84,22 @@ class EmbeddedFigure(tk.Frame):
         self.options_dict = {'logarithmic': [False, False],'xlim': None,'ylim': None}
 
         self.f = plt.Figure(figsize=(10, 6))
-        gs = gridspec.GridSpec(1, 1, height_ratios=[1])
+        gs = gridspec.GridSpec(2, 1, height_ratios=[2,1])
         self.subplot1 = self.f.add_subplot(gs[0])
-        self.subplot1.format_coord = lambda x, y: "x={0:1.2f}, y={1:1.1f}".format(x, y)
-
-
+        self.subplot1.format_coord = lambda x, y: "lambda={0:1.2f}, n/k={1:1.1f}".format(x, y)
+        self.subplot2 = self.f.add_subplot(gs[1],sharex=self.subplot1)
 
         colortuple = master.winfo_rgb(self.master.cget('bg'))
         color_rgb = [x / 16 ** 4 for x in colortuple]
         self.f.patch.set_facecolor(color_rgb)
         self.subplot1.set_ylim(0, 1)
+        plt.setp(self.subplot1.get_xticklabels(), visible=False)
 
-        self.subplot1.set_xlabel(r'Wavelength [$\mu$m]')
+        self.subplot2.set_xlabel(r'Wavelength [$\mu$m]')
         self.subplot1.set_ylabel(r'Refractive Index')
+        self.subplot2.set_ylim(0,1000)
+        self.subplot2.set_ylabel(r'GVD [fs$^2$/mm]')
+
 
         self.f.tight_layout()
 
@@ -105,23 +127,30 @@ class EmbeddedFigure(tk.Frame):
         k = db.get_material_k_numpy(id)
 
         self.subplot1.cla()
+        self.subplot2.cla()
 
         wav=n[:,0]
-
-        self.subplot1.plot(n[:,0],n[:,1])
-        if k is not None:
-            self.subplot1.plot(k[:,0],k[:,1])
 
         if self.options_dict['xlim'] is None:
             self.subplot1.set_xlim(wav.min(), wav.max())
         else:
             self.subplot1.set_xlim(self.options_dict['xlim'][0], self.options_dict['xlim'][1])
+            xmin = self.options_dict['xlim'][0]
+            xmax = self.options_dict['xlim'][1]
+            mask = (wav>xmin) & (wav<xmax)
+            n = n[mask,:]
+            if k is not None:
+                k = k[mask,:]
+            wav = wav[mask]
 
         if self.options_dict['ylim'] is not None:
             self.subplot1.set_ylim(self.options_dict['ylim'][0], self.options_dict['ylim'][1])
 
+        self.subplot1.plot(n[:,0],n[:,1])
+        if k is not None:
+            self.subplot1.plot(k[:,0],k[:,1])
 
-        self.subplot1.set_xlabel(r'Wavelength [$\mu$m]')
+        plt.setp(self.subplot1.get_xticklabels(), visible=False)
         self.subplot1.set_ylabel(r'Refractive Index')
 
         if self.options_dict['logarithmic'][0]:
@@ -134,6 +163,10 @@ class EmbeddedFigure(tk.Frame):
         else:
             self.subplot1.set_yscale('linear')
 
+        wav2,gvd_res = gvd(n)
+        self.subplot2.plot(wav2,gvd_res)
+        self.subplot2.set_xlabel(r'Wavelength [$\mu$m]')
+        self.subplot2.set_ylabel(r'GVD [fs$^2$/mm]')
         plt.pause(0.001)
         self.canvas.draw()
 
@@ -142,35 +175,58 @@ class SearchFrame(tk.Frame):
     def __init__(self, master, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
         self.master = master
+        self._after_id = None
+
+        def handle_update_event(*args):
+            # cancel the old job
+            if self._after_id is not None:
+                master.after_cancel(self._after_id)
+            # create a new job
+            self._after_id = master.after(100, self.search)
 
         self.search_field = LabelWithEntry(self,'Search')
         self.search_field.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.search_field.bind('<Key>',handle_update_event)
 
         self.search_field.bind('<Return>',lambda event: self.search())
+
+
 
         self.frame1 = tk.Frame(self)
         self.frame1.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
+        def treeview_sort_column(tv, col, reverse):
+            l = [(tv.set(k, col), k) for k in tv.get_children('')]
+            l.sort(reverse=reverse)
 
+            # rearrange items in sorted positions
+            for index, (val, k) in enumerate(l):
+                tv.move(k, '', index)
+
+            # reverse sort next time
+            tv.heading(col, command=lambda: \
+                treeview_sort_column(tv, col, not reverse))
 
         self.result_tree = ttk.Treeview(self.frame1, columns=('Index','Material','Data from','rangeMin', 'rangeMax','Extinction','Points'))
+
+
 
         self.scrollbar = ttk.Scrollbar(self.frame1, orient="vertical", command=self.result_tree.yview)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        self.result_tree.heading('#0', text='Index', anchor=tk.CENTER)
         self.result_tree.column("#0", minwidth=50, width=50, stretch=tk.NO)
-        self.result_tree.heading('#1', text='Material', anchor=tk.CENTER)
+        self.result_tree.heading('#0', text='Index', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#0', False))
+        self.result_tree.heading('#1', text='Material', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#1', False))
         self.result_tree.column("#1", minwidth=50, width=200, stretch=tk.NO)
-        self.result_tree.heading('#2', text='Data from', anchor=tk.CENTER)
+        self.result_tree.heading('#2', text='Data from', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#2', False))
         self.result_tree.column("#2", minwidth=50, width=200, stretch=tk.NO)
-        self.result_tree.heading('#3', text='rangeMin', anchor=tk.CENTER)
+        self.result_tree.heading('#3', text='rangeMin', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#3', False))
         self.result_tree.column("#3", minwidth=50, width=130, stretch=tk.NO)
-        self.result_tree.heading('#4', text='rangeMax', anchor=tk.CENTER)
+        self.result_tree.heading('#4', text='rangeMax', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#4', False))
         self.result_tree.column("#4", minwidth=50, width=130, stretch=tk.NO)
-        self.result_tree.heading('#5', text='Extinction', anchor=tk.CENTER)
+        self.result_tree.heading('#5', text='Extinction', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#5', False))
         self.result_tree.column("#5", minwidth=50, width=130, stretch=tk.NO)
-        self.result_tree.heading('#6', text='Points', anchor=tk.CENTER)
+        self.result_tree.heading('#6', text='Points', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#6', False))
         self.result_tree.column("#6", minwidth=50, width=130, stretch=tk.NO)
 
         self.result_tree.pack(side=tk.LEFT)
@@ -186,6 +242,10 @@ class SearchFrame(tk.Frame):
     def search(self):
         exact_bool = False
         search_term = self.search_field.get()
+        if search_term == '':
+            self.result_tree.delete(*self.result_tree.get_children())
+            return
+
         if not exact_bool:
             sql_query = "SELECT * FROM pages WHERE book like '%"+search_term+"%'"
         else:
