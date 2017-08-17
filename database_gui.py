@@ -171,6 +171,94 @@ class EmbeddedFigure(tk.Frame):
         self.canvas.draw()
 
 
+class WholeDatabaseFrame(tk.Toplevel):
+
+    def __init__(self,master,*args,**kwargs):
+        super().__init__(master, *args, **kwargs)
+        self.master = master
+        self.geometry('{}x{}'.format(1300, 600))
+        self.frame1 = tk.Frame(self)
+        self.frame1.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        def treeview_sort_column(tv, col, reverse):
+            l = [(tv.set(k, col), k) for k in tv.get_children('')]
+            l.sort(reverse=reverse)
+
+            # rearrange items in sorted positions
+            for index, (val, k) in enumerate(l):
+                tv.move(k, '', index)
+
+            # reverse sort next time
+            tv.heading(col, command=lambda: \
+                treeview_sort_column(tv, col, not reverse))
+
+        self.result_tree = ttk.Treeview(self.frame1, columns=(
+        'Index', 'Material', 'Data from', 'rangeMin', 'rangeMax', 'Extinction', 'Points','Db number'))
+
+        self.scrollbar = ttk.Scrollbar(self.frame1, orient="vertical", command=self.result_tree.yview)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.BOTH)
+
+        self.result_tree.column("#0", minwidth=50, width=150, stretch=tk.NO)
+        self.result_tree.heading('#0', text='Index', anchor=tk.CENTER,
+                                 command=lambda: treeview_sort_column(self.result_tree, '#0', False))
+        self.result_tree.heading('#1', text='Material', anchor=tk.CENTER,
+                                 command=lambda: treeview_sort_column(self.result_tree, '#1', False))
+        self.result_tree.column("#1", minwidth=50, width=200, stretch=tk.NO)
+        self.result_tree.heading('#2', text='Data from', anchor=tk.CENTER,
+                                 command=lambda: treeview_sort_column(self.result_tree, '#2', False))
+        self.result_tree.column("#2", minwidth=50, width=200, stretch=tk.NO)
+        self.result_tree.heading('#3', text='rangeMin', anchor=tk.CENTER,
+                                 command=lambda: treeview_sort_column(self.result_tree, '#3', False))
+        self.result_tree.column("#3", minwidth=50, width=130, stretch=tk.NO)
+        self.result_tree.heading('#4', text='rangeMax', anchor=tk.CENTER,
+                                 command=lambda: treeview_sort_column(self.result_tree, '#4', False))
+        self.result_tree.column("#4", minwidth=50, width=130, stretch=tk.NO)
+        self.result_tree.heading('#5', text='Extinction', anchor=tk.CENTER,
+                                 command=lambda: treeview_sort_column(self.result_tree, '#5', False))
+        self.result_tree.column("#5", minwidth=50, width=130, stretch=tk.NO)
+        self.result_tree.heading('#6', text='Points', anchor=tk.CENTER,
+                                 command=lambda: treeview_sort_column(self.result_tree, '#6', False))
+        self.result_tree.column("#6", minwidth=50, width=130, stretch=tk.NO)
+
+        self.result_tree.heading('#7', text='Db number', anchor=tk.CENTER,
+                                 command=lambda: treeview_sort_column(self.result_tree, '#6', False))
+        self.result_tree.column("#7", minwidth=50, width=130, stretch=tk.NO)
+
+        self.result_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.result_tree.configure(yscrollcommand=self.scrollbar.set)
+        self.result_tree.bind("<Double-1>", self.OnDoubleClick)
+
+        shelf_list = ['main','organic','glass','other','3d']
+        for shelf in shelf_list:
+            main = db.search_custom("SELECT * FROM pages WHERE shelf LIKE '"+shelf+"'")
+
+            set_of_books = set()
+
+            for el in main:
+                set_of_books.add(el[2])
+
+            x1 = self.result_tree.insert('', 'end', text=shelf,values=())
+            for book in set_of_books:
+                s_res = db.search_custom("SELECT * FROM pages WHERE shelf LIKE '"+shelf+"' and book like '"+book+"'")
+                if len(s_res)>1:
+                    y1 = self.result_tree.insert(x1, 'end', text=book,values=())
+                    for i, res in enumerate(s_res):
+                        self.result_tree.insert(y1, 'end', text=str(i),
+                                                    values=(res[2], res[3], res[7], res[8], ('No', 'Yes')[res[6]], res[9], res[0]))
+                else:
+                    res = s_res[0]
+                    self.result_tree.insert(x1, 'end', text=book, values=(res[2], res[3], res[7], res[8], ('No', 'Yes')[res[6]], res[8], res[0]))
+
+    def OnDoubleClick(self, event):
+        try:
+            item_1 = self.result_tree.selection()[0]
+            item_index = int(self.result_tree.item(item_1, "values")[6])
+            res = db.search_id(item_index)
+            q1.put(['update figure', list(res.values())])
+        except Exception:
+            pass
+
 class SearchFrame(tk.Frame):
     def __init__(self, master, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
@@ -369,7 +457,7 @@ class Application(tk.Frame):
         self.figure_option_frame = FigureOptionFrame(self, self.embedded_figure.options_dict)
         self.figure_option_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        self.option_window = None
+        self.whole_database_window = None
 
         self.create_menubar()
         self.bind_global_commands()
@@ -394,10 +482,10 @@ class Application(tk.Frame):
         self.filemenu.add_separator()
         self.filemenu.add_command(label="Exit", command=self.quit_program, accelerator="Strq+q")
 
-        self.optionmenu = tk.Menu(self.menubar, tearoff=0)
-        self.menubar.add_cascade(label="Options", menu=self.optionmenu)
+        self.datamenu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="Database", menu=self.datamenu)
 
-        self.optionmenu.add_command(label='Example', command=self.open_option_window)
+        self.datamenu.add_command(label='Whole Database', command=self.open_whole_database_window)
 
     def quit_program(self):
         self.master.destroy()
@@ -405,9 +493,9 @@ class Application(tk.Frame):
     def bind_global_commands(self):
         self.bind_all('<Control-q>', lambda event: self.quit_program())
 
-    def open_option_window(self):
-        if self.option_window is None or not self.option_window.winfo_exists():
-            self.option_window = OptionWindow(self)
+    def open_whole_database_window(self):
+        if self.whole_database_window is None or not self.whole_database_window.winfo_exists():
+            self.whole_database_window = WholeDatabaseFrame(self)
 
 
 root = tk.Tk()

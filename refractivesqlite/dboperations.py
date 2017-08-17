@@ -17,11 +17,9 @@ _riiurl = "http://refractiveindex.info/download/database/rii-database-2016-01-31
 class Database:
 
     def __init__(self, sqlitedbpath):
-        self.db_path = sqlitedbpath
         if not os.path.isfile(sqlitedbpath):
-            print("Database file not found.")
-        else:
-            print("Database file found at",sqlitedbpath)
+            raise Exception('Database file not found')
+        self.db_path = sqlitedbpath
 
     def create_database_from_folder(self, yml_database_path, interpolation_points=100):
         create_sqlite_database(yml_database_path, self.db_path,interpolation_points=interpolation_points)
@@ -72,6 +70,7 @@ class Database:
         else:
             print("\t".join(info.keys()))
             print("\t".join(map(str,info.values())))
+        return info
 
     def search_n(self,n,delta_n):
         print("*Search n =",n,"delta_n =",delta_n)
