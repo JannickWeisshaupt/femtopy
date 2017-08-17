@@ -12,14 +12,13 @@ import queue
 import os
 import sys
 import ctypes
+from refractivesqlite import dboperations as DB
+import matplotlib.pyplot as plt
+import numpy as np
 
 plt.rc('font', **{'size': 14})
 
 q1 = queue.Queue()
-
-from refractivesqlite import dboperations as DB
-import matplotlib.pyplot as plt
-import numpy as np
 
 dbpath = r"RefractiveIndex.db"
 
@@ -81,7 +80,7 @@ class EmbeddedFigure(tk.Frame):
         super().__init__(master, *args, **kwargs)
         self.master = master
 
-        self.options_dict = {'logarithmic': [False, False],'xlim': None,'ylim': None}
+        self.options_dict = {'logarithmic': [False, False],'xlim': None,'ylim': None,'eV':False,'cum':False}
 
         self.f = plt.Figure(figsize=(10, 6))
         gs = gridspec.GridSpec(2, 1, height_ratios=[2,1])
@@ -130,25 +129,42 @@ class EmbeddedFigure(tk.Frame):
         self.subplot2.cla()
 
         wav=n[:,0]
+        wav2 = wav[2:]
+        if self.options_dict['eV']:
+            x_plot = 1.240/wav
+        else:
+            x_plot = wav
+
 
         if self.options_dict['xlim'] is None:
-            self.subplot1.set_xlim(wav.min(), wav.max())
+            self.subplot1.set_xlim(x_plot.min(), x_plot.max())
         else:
             self.subplot1.set_xlim(self.options_dict['xlim'][0], self.options_dict['xlim'][1])
             xmin = self.options_dict['xlim'][0]
             xmax = self.options_dict['xlim'][1]
-            mask = (wav>xmin) & (wav<xmax)
+            mask = (x_plot>xmin) & (x_plot<xmax)
             n = n[mask,:]
             if k is not None:
                 k = k[mask,:]
             wav = wav[mask]
+            x_plot = x_plot[mask]
+
+        wav2,gvd_res = gvd(n)
+        if self.options_dict['eV']:
+            x_plot2 = 1.240/wav2
+            self.subplot2.set_xlabel(r'Photon Energy [eV]')
+        else:
+            x_plot2 = wav2
+            self.subplot2.set_xlabel(r'Wavelength [$\mu$m]')
 
         if self.options_dict['ylim'] is not None:
             self.subplot1.set_ylim(self.options_dict['ylim'][0], self.options_dict['ylim'][1])
 
-        self.subplot1.plot(n[:,0],n[:,1])
+
+
+        self.subplot1.plot(x_plot,n[:,1])
         if k is not None:
-            self.subplot1.plot(k[:,0],k[:,1])
+            self.subplot1.plot(x_plot,k[:,1])
 
         plt.setp(self.subplot1.get_xticklabels(), visible=False)
         self.subplot1.set_ylabel(r'Refractive Index')
@@ -163,9 +179,7 @@ class EmbeddedFigure(tk.Frame):
         else:
             self.subplot1.set_yscale('linear')
 
-        wav2,gvd_res = gvd(n)
-        self.subplot2.plot(wav2,gvd_res)
-        self.subplot2.set_xlabel(r'Wavelength [$\mu$m]')
+        self.subplot2.plot(x_plot2,gvd_res)
         self.subplot2.set_ylabel(r'GVD [fs$^2$/mm]')
         plt.pause(0.001)
         self.canvas.draw()
@@ -199,8 +213,7 @@ class WholeDatabaseFrame(tk.Toplevel):
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.BOTH)
 
         self.result_tree.column("#0", minwidth=50, width=150, stretch=tk.NO)
-        self.result_tree.heading('#0', text='Index', anchor=tk.CENTER,
-                                 command=lambda: treeview_sort_column(self.result_tree, '#0', False))
+        self.result_tree.heading('#0', text='Index', anchor=tk.CENTER)
         self.result_tree.heading('#1', text='Material', anchor=tk.CENTER,
                                  command=lambda: treeview_sort_column(self.result_tree, '#1', False))
         self.result_tree.column("#1", minwidth=50, width=200, stretch=tk.NO)
@@ -244,11 +257,11 @@ class WholeDatabaseFrame(tk.Toplevel):
                 if len(s_res)>1:
                     y1 = self.result_tree.insert(x1, 'end', text=book,values=())
                     for i, res in enumerate(s_res):
-                        self.result_tree.insert(y1, 'end', text=str(i),
+                        self.result_tree.insert(y1, 'end', text='',
                                                     values=(res[2], res[3], res[7], res[8], ('No', 'Yes')[res[6]], res[9], res[0]))
                 else:
                     res = s_res[0]
-                    self.result_tree.insert(x1, 'end', text=book, values=(res[2], res[3], res[7], res[8], ('No', 'Yes')[res[6]], res[8], res[0]))
+                    self.result_tree.insert(x1, 'end', text='', values=(res[2], res[3], res[7], res[8], ('No', 'Yes')[res[6]], res[8], res[0]))
 
     def OnDoubleClick(self, event):
         try:
@@ -303,7 +316,7 @@ class SearchFrame(tk.Frame):
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         self.result_tree.column("#0", minwidth=50, width=50, stretch=tk.NO)
-        self.result_tree.heading('#0', text='Index', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#0', False))
+        self.result_tree.heading('#0', text='Index', anchor=tk.CENTER)
         self.result_tree.heading('#1', text='Material', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#1', False))
         self.result_tree.column("#1", minwidth=50, width=200, stretch=tk.NO)
         self.result_tree.heading('#2', text='Data from', anchor=tk.CENTER,command=lambda: treeview_sort_column(self.result_tree, '#2', False))
@@ -354,28 +367,6 @@ class SearchFrame(tk.Frame):
         self.selected_res = res
         q1.put(['update figure',res])
 
-class OptionWindow(tk.Toplevel):
-    def __init__(self, master, *args, **kwargs):
-        super().__init__(master, *args, **kwargs)
-
-        self.master = master
-
-        self.time_column_entry = LabelWithEntry(self, 'Column time:', width_label=20, width_entry=5)
-        self.time_column_entry.set(0, fmt="{0:2d}")
-        self.time_column_entry.pack()
-
-        self.thz_column_entry = LabelWithEntry(self, 'Column Signal:', width_label=20, width_entry=5)
-        self.thz_column_entry.set(0, fmt="{0:2d}")
-        self.thz_column_entry.pack()
-
-        self.ok_button = ttk.Button(self, text="OK", command=self.set_values, takefocus=False)
-        self.ok_button.pack()
-
-    def set_values(self):
-        print(int(self.time_column_entry.get()))
-        print(int(self.thz_column_entry.get()))
-
-
 
 class FigureOptionFrame(tk.Frame):
     def __init__(self, master, option_dict, *args, **kwargs):
@@ -397,6 +388,12 @@ class FigureOptionFrame(tk.Frame):
                                                  command=self.set_values_for_figure)
         self.log_checkbutton_y.pack(side=tk.LEFT, padx=self.padx)
 
+        self.ev_var = tk.IntVar()
+        self.ev_var.set(self.option_dict['eV'])
+        self.ev_checkbutton = ttk.Checkbutton(self, text="eV", variable=self.ev_var, takefocus=False,
+                                                 command=self.set_values_for_figure)
+        self.ev_checkbutton.pack(side=tk.LEFT, padx=self.padx)
+
         self.xmin_entry = LabelWithEntry(self,'xmin=', width_entry=5,width_label=5)
         self.xmin_entry.bind("<Return>",lambda event: self.set_values_for_figure())
         self.xmin_entry.pack(side=tk.LEFT, padx=self.padx)
@@ -412,6 +409,12 @@ class FigureOptionFrame(tk.Frame):
         self.ymax_entry = LabelWithEntry(self,'ymax=', width_entry=5,width_label=5)
         self.ymax_entry.bind("<Return>",lambda event: self.set_values_for_figure())
         self.ymax_entry.pack(side=tk.LEFT, padx=self.padx)
+
+        self.cum_var = tk.IntVar()
+        self.cum_var.set(self.option_dict['cum'])
+        self.cum_checkbutton = ttk.Checkbutton(self, text="Cumulative", variable=self.cum_var , takefocus=False,
+                                                 command=self.set_values_for_figure)
+        self.cum_checkbutton.pack(side=tk.LEFT, padx=self.padx)
 
     def set_values_for_figure(self):
         try:
@@ -433,6 +436,16 @@ class FigureOptionFrame(tk.Frame):
             self.option_dict['logarithmic'][1] = True
         else:
             self.option_dict['logarithmic'][1] = False
+
+        if self.ev_var.get():
+            self.option_dict['eV'] = True
+        else:
+            self.option_dict['eV'] = False
+
+        if self.cum_var.get():
+            self.option_dict['cum'] = True
+        else:
+            self.option_dict['cum'] = False
 
         q1.put(('update figure',None))
 
