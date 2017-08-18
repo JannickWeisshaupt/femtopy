@@ -2,7 +2,7 @@ from tkinter import ttk
 from tkinter import messagebox
 from tkinter import filedialog
 import tkinter as tk
-import matplotlib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
 from matplotlib import gridspec
@@ -24,34 +24,6 @@ dbpath = r"RefractiveIndex.db"
 
 db = DB.Database(dbpath)
 
-c0 = 3e8
-
-
-def derivative(n,order):
-    l = n[:,0]
-    ref = n[:,1]
-
-    for i in range(order):
-        ref = (ref-np.roll(ref,1))/(l-np.roll(l,1))
-    return np.array([l[order:],ref[order:]]).T
-
-def second_der(n):
-    l = n[:,0]
-    ref = n[:,1]
-
-    var1 = np.roll(ref,-1) - 2*ref+np.roll(ref,1)
-    var2 = l-np.roll(l,1)
-    res = var1/var2**2
-    return np.array([l[1:-1],res[1:-1]]).T
-
-
-def gvd(data):
-    der_sol = second_der(data)
-    lambda0 = der_sol[:,0]
-    der_1 = der_sol[:,1]
-    res = lambda0**3/(2*np.pi*c0**2)*der_1
-    res = res * 1e21
-    return lambda0,res
 
 
 class NewCBox(ttk.Combobox):
@@ -124,64 +96,76 @@ class EmbeddedFigure(tk.Frame):
     def formatter1(self,x,y):
         return "lambda={0:1.2f}, n/k={1:1.3f}".format(x, y)
 
-    def update_figure(self, data=None):
+    def update_figure(self, refractive_index_list=None):
 
-        if data is None:
+        if refractive_index_list is None:
             if self.last_data is None:
                 return
             else:
-                data = self.last_data
+                refractive_index_list = self.last_data
         else:
-            self.last_data = data
-
-        id = int(data[0])
-        n = db.get_material_n_numpy(id)
-        k = db.get_material_k_numpy(id)
+            self.last_data = refractive_index_list
 
         self.subplot1.cla()
         self.subplot2.cla()
 
-        wav=n[:,0]
-        wav2,gvd_res = gvd(n)
+        x_min_list = []
+        x_max_list = []
+        y_min_list = []
+        y_max_list = []
 
-        if self.options_dict['eV']:
-            x_plot = 1.240/wav
-            x_plot2 = 1.240/wav2
-            self.subplot2.set_xlabel(r'Photon Energy [eV]')
-        else:
-            x_plot = wav
-            x_plot2 = wav2
-            self.subplot2.set_xlabel(r'Wavelength [$\mu$m]')
+        color_cycle = mpl.rcParams['axes.prop_cycle']
+
+        for refractive_index_handler,plot_color in zip(refractive_index_list,color_cycle):
+            wav = refractive_index_handler.wavelength
+            n = refractive_index_handler.n
+            k = refractive_index_handler.k
+            gvd  = refractive_index_handler.gvd
+
+            if self.options_dict['eV']:
+                x_plot = 1.240/wav
+                self.subplot2.set_xlabel(r'Photon Energy [eV]')
+            else:
+                x_plot = wav
+                self.subplot2.set_xlabel(r'Wavelength [$\mu$m]')
+
+            x_min_list.append(x_plot.min())
+            x_max_list.append(x_plot.max())
+            if k is None:
+                y_min_list.append(n.min())
+                y_max_list.append(n.max())
+            else:
+                y_min_list.append(min([n.min(),k.min()]))
+                y_max_list.append(min([n.max(),k.max()]))
 
 
+            if self.options_dict['xlim'] is not None:
+                xmin = self.options_dict['xlim'][0]
+                xmax = self.options_dict['xlim'][1]
+                mask = (x_plot>=xmin) & (x_plot<=xmax)
+                mask = np.roll(mask, 1) | mask | np.roll(mask, -1)
+                n = n[mask]
+                gvd = gvd[mask]
+                if k is not None:
+                    k = k[mask]
+                wav = wav[mask]
+                x_plot = x_plot[mask]
+
+            plot_color=plot_color['color']
+            self.subplot1.plot(x_plot,n,color=plot_color,label=refractive_index_handler.name)
+            if k is not None:
+                self.subplot1.plot(x_plot,k,'--',color=plot_color)
+
+            self.subplot2.plot(x_plot,gvd,color=plot_color)
 
         if self.options_dict['xlim'] is None:
-            self.subplot1.set_xlim(x_plot.min(), x_plot.max())
+            self.subplot1.set_xlim(min(x_min_list), max(x_max_list))
         else:
             self.subplot1.set_xlim(self.options_dict['xlim'][0], self.options_dict['xlim'][1])
-            xmin = self.options_dict['xlim'][0]
-            xmax = self.options_dict['xlim'][1]
-            mask = (x_plot>=xmin) & (x_plot<=xmax)
-            mask2 = (x_plot2>=xmin) & (x_plot2<=xmax)
-
-            n = n[mask,:]
-            gvd_res = gvd_res[mask2]
-            if k is not None:
-                k = k[mask,:]
-            wav = wav[mask]
-            x_plot = x_plot[mask]
-            x_plot2 = x_plot2[mask2]
-
 
 
         if self.options_dict['ylim'] is not None:
             self.subplot1.set_ylim(self.options_dict['ylim'][0], self.options_dict['ylim'][1])
-
-
-
-        self.subplot1.plot(x_plot,n[:,1])
-        if k is not None:
-            self.subplot1.plot(x_plot,k[:,1])
 
         plt.setp(self.subplot1.get_xticklabels(), visible=False)
         self.subplot1.set_ylabel(r'Refractive Index')
@@ -196,10 +180,64 @@ class EmbeddedFigure(tk.Frame):
         else:
             self.subplot1.set_yscale('linear')
 
-        self.subplot2.plot(x_plot2,gvd_res)
+        if len(refractive_index_list)>1:
+            self.subplot1.legend()
+
         self.subplot2.set_ylabel(r'GVD [fs$^2$/mm]')
         plt.pause(0.001)
         self.canvas.draw()
+
+
+class RefrectiveIndexHandler:
+    def __init__(self):
+        self.n = None
+        self.k = None
+        self.wavelength = None
+        self.gvd = None
+        self.name = None
+        self.c0 = 3e8
+
+    def get_data_from_id(self,id):
+        info = db.search_id(id)
+        self.name = info['book']+' '+info['page']
+        var1 = db.get_material_n_numpy(id)
+        self.wavelength = var1[:,0]
+        self.n = var1[:,1]
+        var2 = db.get_material_k_numpy(id)
+        if var2 is not None:
+            self.k = var2[:,1]
+        else:
+            self.k = None
+        wav2, gvd_res = self.calculate_gvd(self.wavelength, self.n)
+        self.gvd = gvd_res
+
+    def get_data_from_info(self,data):
+        id = int(data[0])
+        self.get_data_from_id(id)
+
+    def derivative(self,n, order):
+        l = n[:, 0]
+        ref = n[:, 1]
+
+        for i in range(order):
+            ref = (ref - np.roll(ref, 1)) / (l - np.roll(l, 1))
+        return np.array([l[order:], ref[order:]]).T
+
+    def second_der(self,l, ref):
+        var1 = np.roll(ref, -1) - 2 * ref + np.roll(ref, 1)
+        var2 = l - np.roll(l, 1)
+        res = var1 / var2 ** 2
+        res[0] = np.nan
+        res[-1] = np.nan
+        return np.array([l, res]).T
+
+    def calculate_gvd(self, l,ref):
+        der_sol = self.second_der(l, ref)
+        lambda0 = der_sol[:, 0]
+        der_1 = der_sol[:, 1]
+        res = lambda0 ** 3 / (2 * np.pi * self.c0 ** 2) * der_1
+        res = res * 1e21
+        return lambda0, res
 
 
 class WholeDatabaseFrame(tk.Toplevel):
@@ -289,6 +327,7 @@ class WholeDatabaseFrame(tk.Toplevel):
         except Exception:
             pass
 
+
 class SearchFrame(tk.Frame):
     def __init__(self, master, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
@@ -302,13 +341,25 @@ class SearchFrame(tk.Frame):
             # create a new job
             self._after_id = master.after(20, self.search)
 
-        self.search_field = LabelWithEntry(self,'Search')
-        self.search_field.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.frame0 = tk.Frame(self)
+        self.frame0.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        self.search_field = LabelWithEntry(self.frame0,'Search')
+        self.search_field.pack(side=tk.LEFT)
+
         self.search_field.bind('<Key>',handle_update_event)
 
-        self.search_field.bind('<Return>',lambda event: self.search())
+        self.exact_var = tk.IntVar()
+        self.exact_var.set(False)
+        self.exact_checkbutton = ttk.Checkbutton(self.frame0, text="Exact", variable=self.exact_var, takefocus=False,
+                                                 command=handle_update_event)
 
+        self.exact_checkbutton.pack(side=tk.LEFT, padx=5)
 
+        self.search_options = {'Material': 'book','Data from':'page'}
+        self.search_combo = NewCBox(self.frame0,self.search_options,current='Material')
+        self.search_combo.bind("<<ComboboxSelected>>", handle_update_event)
+        self.search_combo.pack(side=tk.LEFT, padx=5)
 
         self.frame1 = tk.Frame(self)
         self.frame1.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
@@ -348,7 +399,10 @@ class SearchFrame(tk.Frame):
         self.result_tree.column("#6", minwidth=50, width=130, stretch=tk.NO)
 
         self.result_tree.pack(side=tk.LEFT)
-        self.result_tree.bind("<Double-1>", self.OnDoubleClick)
+        def delayed_click(event):
+            master.after(10,lambda: self.click_event(event))
+
+        self.result_tree.bind("<Button-1>", delayed_click)
 
 
 
@@ -358,16 +412,18 @@ class SearchFrame(tk.Frame):
         self.selected_res = None
 
     def search(self):
-        exact_bool = False
+        exact_bool = self.exact_var.get()
         search_term = self.search_field.get()
         if search_term == '':
             self.result_tree.delete(*self.result_tree.get_children())
             return
 
+
+        search_area = self.search_combo.value()
         if not exact_bool:
-            sql_query = "SELECT * FROM pages WHERE book like '%"+search_term+"%'"
+            sql_query = "SELECT * FROM pages WHERE "+search_area+" like '%"+search_term+"%'"
         else:
-            sql_query = "SELECT * FROM pages WHERE book like '" + search_term + "'"
+            sql_query = "SELECT * FROM pages WHERE "+search_area+" like '" + search_term + "'"
         self.search_res = db.search_custom(sql_query)
         # self.search_res = db.search_pages(search_term,exact=True)
         self.update_tree()
@@ -377,12 +433,18 @@ class SearchFrame(tk.Frame):
         for i,res in enumerate(self.search_res):
             self.result_tree.insert('', 'end', text=str(i),values=(res[2],res[3],res[7],res[8],('No','Yes')[res[6]],res[9]))
 
-    def OnDoubleClick(self, event):
-        item_1 = self.result_tree.selection()[0]
-        item_index = int(self.result_tree.item(item_1, "text"))
-        res = self.search_res[item_index]
-        self.selected_res = res
-        q1.put(['update figure',res])
+    def click_event(self, event):
+        selection_list = self.result_tree.selection()
+        self.master.list_of_refractive_index = []
+        for item_1 in selection_list:
+            item_index = int(self.result_tree.item(item_1, "text"))
+            res = self.search_res[item_index]
+            self.selected_res = res
+            ref1 = RefrectiveIndexHandler()
+            ref1.get_data_from_id(res[0])
+            self.master.list_of_refractive_index.append(ref1)
+        if len(selection_list) > 0:
+            q1.put(['update figure'])
 
 
 class FigureOptionFrame(tk.Frame):
@@ -481,6 +543,8 @@ class Application(tk.Frame):
         self.search_frame = SearchFrame(self)
         self.search_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
+        self.list_of_refractive_index = None
+
         self.embedded_figure = EmbeddedFigure(self)
         self.embedded_figure.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
@@ -502,7 +566,7 @@ class Application(tk.Frame):
         if not q1.empty():
             q_el = q1.get()
             if q_el[0] == 'update figure':
-                self.embedded_figure.update_figure(q_el[1])
+                self.embedded_figure.update_figure(self.list_of_refractive_index)
 
     def create_menubar(self):
         self.menubar = tk.Menu(self, tearoff=0)

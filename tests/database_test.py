@@ -13,7 +13,6 @@ n = db.get_material_n_numpy(61)
 k = db.get_material_k_numpy(61)
 
 
-
 def derivative(n,order):
     l = n[:,0]
     ref = n[:,1]

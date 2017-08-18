@@ -63,13 +63,14 @@ class Database:
         conn.close()
         return results
 
-    def search_id(self,pageid):
+    def search_id(self,pageid,print_bool=False):
         info = self._get_page_info(pageid)
-        if info is None:
-            print("PageID not found.")
-        else:
-            print("\t".join(info.keys()))
-            print("\t".join(map(str,info.values())))
+        if print_bool:
+            if info is None:
+                print("PageID not found.")
+            else:
+                print("\t".join(info.keys()))
+                print("\t".join(map(str,info.values())))
         return info
 
     def search_n(self,n,delta_n):
