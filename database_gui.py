@@ -55,13 +55,26 @@ class LabelWithEntry(tk.Frame):
     def bind(self, sequence=None, func=None, add=None):
         self.entry.bind(sequence=sequence, func=func, add=add)
 
+class FixedDict(object):
+    def __init__(self, dictionary):
+        self._dictionary = dictionary
+
+    def __setitem__(self, key, item):
+        if key not in self._dictionary:
+            raise KeyError("The key {} is not defined.".format(key))
+        self._dictionary[key] = item
+
+    def __getitem__(self, key):
+        return self._dictionary[key]
+
+
 
 class EmbeddedFigure(tk.Frame):
     def __init__(self, master, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
         self.master = master
 
-        self.options_dict = {'logarithmic': [False, False],'xlim': None,'ylim': None,'eV':False,'cum':False}
+        self.options_dict = FixedDict({'logarithmic': [False, False],'xlim': None,'ylim': None,'eV':False,'k':True})
 
         self.f = plt.Figure(figsize=(10, 6))
         gs = gridspec.GridSpec(2, 1, height_ratios=[2,1])
@@ -131,7 +144,7 @@ class EmbeddedFigure(tk.Frame):
 
             x_min_list.append(x_plot.min())
             x_max_list.append(x_plot.max())
-            if k is None:
+            if k is None or not self.options_dict['k']:
                 y_min_list.append(n.min())
                 y_max_list.append(n.max())
             else:
@@ -153,7 +166,7 @@ class EmbeddedFigure(tk.Frame):
 
             plot_color=plot_color['color']
             self.subplot1.plot(x_plot,n,color=plot_color,label=refractive_index_handler.name)
-            if k is not None:
+            if k is not None and self.options_dict['k']:
                 self.subplot1.plot(x_plot,k,'--',color=plot_color)
 
             self.subplot2.plot(x_plot,gvd,color=plot_color)
@@ -182,6 +195,7 @@ class EmbeddedFigure(tk.Frame):
 
         if len(refractive_index_list)>1:
             self.subplot1.legend()
+
 
         self.subplot2.set_ylabel(r'GVD [fs$^2$/mm]')
         plt.pause(0.001)
@@ -241,7 +255,6 @@ class RefrectiveIndexHandler:
 
 
 class WholeDatabaseFrame(tk.Toplevel):
-
     def __init__(self,master,*args,**kwargs):
         super().__init__(master, *args, **kwargs)
         self.master = master
@@ -295,7 +308,11 @@ class WholeDatabaseFrame(tk.Toplevel):
         self.result_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.result_tree.configure(yscrollcommand=self.scrollbar.set)
-        self.result_tree.bind("<Double-1>", self.OnDoubleClick)
+
+        def delayed_click(event):
+            master.after(10,lambda: self.click_event(event))
+
+        self.result_tree.bind("<Button-1>", delayed_click)
 
         shelf_list = ['main','organic','glass','other','3d']
         for shelf in shelf_list:
@@ -318,14 +335,23 @@ class WholeDatabaseFrame(tk.Toplevel):
                     res = s_res[0]
                     self.result_tree.insert(x1, 'end', text='', values=(res[2], res[3], res[7], res[8], ('No', 'Yes')[res[6]], res[8], res[0]))
 
-    def OnDoubleClick(self, event):
-        try:
-            item_1 = self.result_tree.selection()[0]
-            item_index = int(self.result_tree.item(item_1, "values")[6])
-            res = db.search_id(item_index)
-            q1.put(['update figure', list(res.values())])
-        except Exception:
-            pass
+    def click_event(self, event):
+        selection_list = self.result_tree.selection()
+        self.master.list_of_refractive_index = []
+        for i,item_1 in enumerate(selection_list):
+            res = self.result_tree.item(item_1,"values")
+            if res == '':
+                continue
+            ref1 = RefrectiveIndexHandler()
+            ref1.get_data_from_id(res[6])
+            self.master.list_of_refractive_index.append(ref1)
+            if i>20:
+                tk.messagebox.showerror('Too many selected','You have more than twenty selected which is imho too much')
+                break
+
+        if len(self.master.list_of_refractive_index) > 0:
+            q1.put(['update figure'])
+
 
 
 class SearchFrame(tk.Frame):
@@ -473,6 +499,12 @@ class FigureOptionFrame(tk.Frame):
                                                  command=self.set_values_for_figure)
         self.ev_checkbutton.pack(side=tk.LEFT, padx=self.padx)
 
+        self.k_var = tk.IntVar()
+        self.k_var.set(self.option_dict['k'])
+        self.k_checkbutton = ttk.Checkbutton(self, text="Show k", variable=self.k_var , takefocus=False,
+                                                 command=self.set_values_for_figure)
+        self.k_checkbutton.pack(side=tk.LEFT, padx=self.padx)
+
         self.xmin_entry = LabelWithEntry(self,'xmin=', width_entry=5,width_label=5)
         self.xmin_entry.bind("<Return>",lambda event: self.set_values_for_figure())
         self.xmin_entry.pack(side=tk.LEFT, padx=self.padx)
@@ -489,11 +521,6 @@ class FigureOptionFrame(tk.Frame):
         self.ymax_entry.bind("<Return>",lambda event: self.set_values_for_figure())
         self.ymax_entry.pack(side=tk.LEFT, padx=self.padx)
 
-        self.cum_var = tk.IntVar()
-        self.cum_var.set(self.option_dict['cum'])
-        self.cum_checkbutton = ttk.Checkbutton(self, text="Cumulative", variable=self.cum_var , takefocus=False,
-                                                 command=self.set_values_for_figure)
-        self.cum_checkbutton.pack(side=tk.LEFT, padx=self.padx)
 
     def set_values_for_figure(self):
         try:
@@ -521,10 +548,10 @@ class FigureOptionFrame(tk.Frame):
         else:
             self.option_dict['eV'] = False
 
-        if self.cum_var.get():
-            self.option_dict['cum'] = True
+        if self.k_var.get():
+            self.option_dict['k'] = True
         else:
-            self.option_dict['cum'] = False
+            self.option_dict['k'] = False
 
         q1.put(('update figure',None))
 
@@ -582,6 +609,7 @@ class Application(tk.Frame):
         self.datamenu.add_command(label='Whole Database', command=self.open_whole_database_window)
 
     def quit_program(self):
+
         self.master.destroy()
 
     def bind_global_commands(self):
