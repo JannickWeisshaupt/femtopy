@@ -1,2 +1,9 @@
 .idea
 __pycache__
+build
+build/*
+icon.ico
+icon.svg
+Would skip repository build/exe.win32-3.6/pyterminal
+RefractiveIndex
+RefractiveIndex/*
