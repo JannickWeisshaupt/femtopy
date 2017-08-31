@@ -780,7 +780,7 @@ for ref in refractive_indexes:
 root = tk.Tk()
 root.iconbitmap(r'icon.ico')
 app = Application(master=root)
-ref1 = RefrectiveIndexHandler(id=167)
-app.list_of_refractive_index = [ref1]
-app.open_short_pulse_window()
+# ref1 = RefrectiveIndexHandler(id=167)
+# app.list_of_refractive_index = [ref1]
+# app.open_short_pulse_window()
 root.mainloop()
